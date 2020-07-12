@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from data.read_data import read_last_time, read_n_recent
-from helper_functions import estimate_pdf, summary_table, make_hist, graph_hist, graph_donut, graph_submission, graph_LMS_time
+from helper_functions import estimate_pdf, summary_table, make_hist, graph_multi_hist, graph_hist
+from helper_functions import graph_donut, graph_submission, graph_LMS_time
 import matplotlib.pyplot as plt
 
 
@@ -17,20 +18,25 @@ def basics(course, current_term, cur_course_df):
     # combine f_name and l_name into name:
     cur_course_df['name'] = cur_course_df['f_name'] + ' ' + cur_course_df['l_name']
 
-    grade_df = cur_course_df.iloc[:, 8:-9]
+    grade_df = cur_course_df.iloc[:, 8:-10]
     grade_df.dropna(how='all', axis=1, inplace=True) # drop unavailable grades
 
     # Summary:
     st.subheader('Summary')
     summary_table(cur_course_df, grade_df)
+    st.text('')
 
     # Grades:
     st.subheader('Grades')
-    # graph_hist(grade_df, 'Distribution of grades', 'Grades')
+    st.info('Click on the legend to select the desired assessment')
+    # switch to long form:
+    grade_df = grade_df.melt(var_name='assessment', value_name='grade')
+    graph_multi_hist(grade_df, x_field='grade', color_field='assessment', max_nbins=20, x_title='Grade')
 
     # Attendance:
     st.subheader('Attendance')
-    # graph_hist()
+    st.text('')
+    graph_hist(cur_course_df, 'attendance', x_title='Attendance percentage')
 
     # Submission Status:
     st.subheader('Submission')
@@ -94,15 +100,15 @@ def main():
     func_options = ['Basics', 'Advanced']
     func_choice = st.sidebar.radio('Options', func_options)
 
+    # About:
+    st.sidebar.header('About')
+    st.sidebar.info('C_STATS is a learning management and analytics tool.')
+
     if func_choice == 'Basics':
         basics(course, current_term, cur_course_df)
 
     elif func_choice == 'Advanced':
         advanced(course, current_term)
-
-    # About:
-    st.sidebar.header('About')
-    st.sidebar.info('C_STATS is a learning management and analytics tool.')
 
 
 if __name__ == '__main__':
