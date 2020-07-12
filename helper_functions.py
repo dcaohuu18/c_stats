@@ -78,9 +78,36 @@ def make_hist(series, bins):
     return hist_df
 
 
-def graph_hist(df, title, x_label, y_label='Number', width=600, height=500):
-    # Create a blank figure with labels:
-    return
+def graph_multi_hist(df, x_field, color_field, x_title='Value', y_title='Number of students', width=600, height=400, max_nbins=10):
+    selection = alt.selection_multi(fields=[color_field])
+    color = alt.condition(selection, alt.Color('%s:N'%color_field, legend=None), alt.value('lightgray'))
+    opacity = alt.condition(selection, alt.value(0.8), alt.value(0.2))
+
+    hist = alt.Chart(df).mark_area(interpolate='step').encode(
+                x=alt.X('%s:Q'%x_field, bin=alt.Bin(maxbins=max_nbins), title=x_title),
+                y=alt.Y('count()', stack=None, title=y_title),
+                color=color,
+                opacity=opacity,
+                ).properties(width=width, height=height)
+
+    legend = alt.Chart(df).mark_bar().encode(
+                y=alt.Y('%s:N'%color_field, title=None, axis=alt.Axis(orient='right')),
+                color=color,
+                opacity=opacity
+                ).add_selection(selection)
+
+    st.altair_chart((hist | legend).configure_axis(titleFontSize=15))
+    
+
+def graph_hist(df, x_field, x_title='Value', y_title='Number of students', width=635, height=400, max_nbins=10):
+    hist = alt.Chart(df).mark_bar(opacity=0.8).encode(
+                x=alt.X("%s:Q"%x_field, title=x_title, bin=alt.Bin(maxbins=max_nbins)), 
+                y=alt.Y('count()', title=y_title),
+                tooltip=['count()']
+                ).configure_axis(titleFontSize=15
+                ).properties(width=width, height=height).interactive()
+
+    st.altair_chart(hist)
 
 
 def graph_submission(df):
@@ -108,6 +135,8 @@ def graph_LMS_time(df):
             ).configure_axis(titleFontSize=15
             ).configure_legend(labelFontSize=12)
 
+    # add mean lines?
+
     st.altair_chart(chart)
 
 
@@ -122,19 +151,19 @@ from math import pi
 def graph_donut(percentage_df, title, center_text='', value_fname='value', percentage_fname='percentage'):
     percentage_df['angle'] = percentage_df['percentage']/100 * 2 * pi
 
+    palette = {3: ['#54a24b', '#eeca3b', '#e45756'], # for plotting submission
+               4: ['#4c78a8', '#54a24b', '#eeca3b', '#e45756']} # for LMS mess distribution 
     try:
-        percentage_df['color'] = ['#54a24b', '#eeca3b', '#e45756'] # for plotting submission
-    except ValueError:
-        palette = list(Category10[len(percentage_df.index)])
-        palette[1], palette[2] = palette[2], palette[1] # swap orange and green
-        percentage_df['color'] = palette
+        percentage_df['color'] = palette[len(percentage_df.index)]
+    except KeyError:
+        percentage_df['color'] = list(Category10[len(percentage_df.index)]) # for others
 
     fig = figure(plot_height=400, plot_width=700, title=title, x_range=(-.5, .5))
 
     fig.annular_wedge(x=0, y=1, inner_radius=0.15, outer_radius=0.25, direction="anticlock",
                     start_angle=cumsum('angle', include_zero=True), end_angle=cumsum('angle'),
                     hover_fill_alpha = 1.0, hover_fill_color = 'skyblue', line_color="white", 
-                    legend_field=value_fname, color='color', source=percentage_df, name='donut')
+                    legend_field=value_fname, color='color', alpha=0.9, source=percentage_df, name='donut')
 
     tooltips=[(value_fname, "@%s"%value_fname), (percentage_fname, "@%s"%percentage_fname+"{0.2f}%")]
     hover = HoverTool(tooltips=tooltips, names=['donut'])
