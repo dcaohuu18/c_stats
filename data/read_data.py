@@ -32,7 +32,7 @@ def term_range(current, n_term): # return a list of the past n_term starting at 
     terms_passed = 0
     term_list = []
 
-    while terms_passed <= n_term:
+    while terms_passed < n_term:
         temp_term = subtract_term(current, terms_passed)
         term_list.append(temp_term)
 
@@ -54,7 +54,7 @@ def read_last_time(course_code, current, cutoff=10): # read the last time this c
 
     return last_time_df
 
-def read_n_recent(course_code, current_term, n_term=0):
+def read_n_recent(course_code, current_term, n_term=1):
     all_term_df = pd.DataFrame()
     for t in term_range(current_term, n_term):
         temp_df = read_course(course_code, t)
