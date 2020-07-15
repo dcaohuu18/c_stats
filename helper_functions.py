@@ -15,8 +15,8 @@ def estimate_pdf(sample, n_points=101):
     return xs, ds
 
 
-#####
-# GRAPHS:
+#=======================================================================
+# BASICS - GRAPHS:
 
 def summary_table(course_df, grade_df):
     # Mean statistics:
@@ -65,7 +65,7 @@ def summary_table(course_df, grade_df):
 
 
 import altair as alt
-from vega_datasets import data
+# from vega_datasets import data
 
 
 def make_hist(series, bins):
@@ -182,6 +182,69 @@ def graph_donut(percentage_df, title, center_text='', value_fname='value', perce
     fig.title.text_font_size = '12pt'
 
     st.bokeh_chart(fig)
+
+
+#=======================================================================
+# ADVANCED - ML METHODS:
+
+from sklearn import neighbors, metrics
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+
+
+def get_letter_gr(course_df, D_cutoff, step):
+    grade_bins = [0] + [l-1 for l in range(D_cutoff, D_cutoff+4*step, step)] + [100]
+    letters = ['F', 'D', 'C', 'B', 'A']
+    return pd.cut(course_df.final_grade, grade_bins, labels=letters) 
+
+
+def knn(cur_course_df, pre_courses_df, vars):
+    st.sidebar.header('Control Center')
+    st.sidebar.warning('We only consider A, B, C, D, and F.')
+    D_cutoff = st.sidebar.number_input("Cutoff point of a D:", min_value=1, max_value=96, value=60)
+    step = st.sidebar.number_input("Step:", min_value=1, max_value=20, value=10)
+    K = st.sidebar.slider("Select K:", min_value=1, max_value=10, value=5) # need to change this: max = len//5
+
+    go = st.button('Run model')
+
+    if go:
+        pre_courses_df.reset_index(inplace=True)
+        pre_courses_df['letter_gr'] = get_letter_gr(pre_courses_df, D_cutoff, step)
+
+        X = pre_courses_df[vars].copy()
+        Y = pre_courses_df['letter_gr'].copy()
+
+        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
+
+        knn = neighbors.KNeighborsClassifier(n_neighbors=K, weights='uniform') # what's the arg weights for?
+        knn.fit(X_train, Y_train)
+
+        test_prediction = knn.predict(X_test)
+        accuracy = metrics.accuracy_score(Y_test, test_prediction)
+
+        st.write('Accuracy: {}'.format(accuracy))
+
+        cur_X = cur_course_df[vars]
+        cur_prediction = knn.predict(cur_X)
+
+        prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
+        #prediction_df = cur_course_df.copy()
+        prediction_df['predicted_grade'] = cur_prediction
+
+        summary_table = prediction_df.predicted_grade.value_counts()
+        summary_table.rename('predicted_count', inplace=True)
+        
+        st.table(summary_table)
+        st.table(prediction_df)
+
+
+
+def ols_reg():
+    return
+
+
+def multino_reg():
+    return
 
 
 if __name__ == '__main__':
