@@ -190,6 +190,21 @@ def graph_donut(percentage_df, title, center_text='', value_fname='value', perce
 from sklearn import neighbors, metrics
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+
+def normalize(course_df, weights_dict):
+    # normalize the number of assessments by taking the mean of each type:
+    for ass in weights_dict.keys(): 
+        course_df[ass] = course_df.filter(regex='^{}'.format(ass)).mean(axis=1)
+
+
+def reweigh(course_df, weights_dict):
+    # reweigh final grade:
+    course_df['final_grade'] = 0
+    for ass, w in weights_dict.items():
+        course_df['final_grade'] += course_df[ass]*(w/100)
 
 
 def get_letter_gr(course_df, D_cutoff, step):
@@ -198,20 +213,18 @@ def get_letter_gr(course_df, D_cutoff, step):
     return pd.cut(course_df.final_grade, grade_bins, labels=letters) 
 
 
-def knn(cur_course_df, pre_courses_df, vars):
+def knn(cur_course_df, pre_courses_df, selected_vars):
     st.sidebar.header('Control Center')
     st.sidebar.warning('We only consider A, B, C, D, and F.')
     D_cutoff = st.sidebar.number_input("Cutoff point of a D:", min_value=1, max_value=96, value=60)
     step = st.sidebar.number_input("Step:", min_value=1, max_value=20, value=10)
     K = st.sidebar.slider("Select K:", min_value=1, max_value=10, value=5) # need to change this: max = len//5
-
-    go = st.button('Run model')
-
-    if go:
+ 
+    if st.button('Run model'):
         pre_courses_df.reset_index(inplace=True)
         pre_courses_df['letter_gr'] = get_letter_gr(pre_courses_df, D_cutoff, step)
 
-        X = pre_courses_df[vars].copy()
+        X = pre_courses_df[selected_vars].copy()
         Y = pre_courses_df['letter_gr'].copy()
 
         X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
@@ -222,29 +235,88 @@ def knn(cur_course_df, pre_courses_df, vars):
         test_prediction = knn.predict(X_test)
         accuracy = metrics.accuracy_score(Y_test, test_prediction)
 
-        st.write('Accuracy: {}'.format(accuracy))
-
-        cur_X = cur_course_df[vars]
-        cur_prediction = knn.predict(cur_X)
+        cur_X = cur_course_df[selected_vars].copy()
+        cur_prediction = knn.predict(cur_X).copy()
 
         prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
-        #prediction_df = cur_course_df.copy()
         prediction_df['predicted_grade'] = cur_prediction
+        prediction_df.set_index('name', inplace=True)
 
-        summary_table = prediction_df.predicted_grade.value_counts()
-        summary_table.rename('predicted_count', inplace=True)
+        summary_df = prediction_df.predicted_grade.value_counts()
+        summary_df.rename('predicted_count', inplace=True)
         
-        st.table(summary_table)
+        st.markdown('<hr>', unsafe_allow_html=True)
+        st.markdown('**Accuracy:** {:.2%}'.format(accuracy))
+        st.table(summary_df)
+        st.table(prediction_df)
+    
+
+def ols_reg(cur_course_df, pre_courses_df, selected_vars):
+    formula = 'final_grade ~ {}'.format(selected_vars[0])
+    for v in selected_vars[1:]:
+        if v=='race' or v=='gender':
+            formula += ' + C({})'.format(v) # treat as categorical       
+        else:
+            formula += ' + {}'.format(v)
+    
+    if st.button('Run model'):
+        model = smf.ols(formula, data=pre_courses_df) 
+        results = model.fit()
+
+        prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
+        prediction_df['predicted_grade'] = results.predict(cur_course_df[selected_vars])
+        prediction_df.set_index('name', inplace=True)
+
+        st.markdown('<hr>', unsafe_allow_html=True)
+        st.markdown('$$R^2$$: {:.2f}'.format(results.rsquared))
+        st.markdown('$$p$$-value: {:.2f}'.format(results.f_pvalue))
         st.table(prediction_df)
 
 
+def multino_reg(cur_course_df, pre_courses_df, selected_vars):
+    st.sidebar.header('Control Center')
+    st.sidebar.warning('We only consider A, B, C, D, and F.')
+    D_cutoff = st.sidebar.number_input("Cutoff point of a D:", min_value=1, max_value=96, value=60)
+    step = st.sidebar.number_input("Step:", min_value=1, max_value=20, value=10)
+ 
+    if st.button('Run model'):
+        pre_courses_df['letter_gr'] = get_letter_gr(pre_courses_df, D_cutoff, step)
+        # encode letter_gr:
+        le = LabelEncoder()
+        pre_courses_df['letter_gr'] = le.fit_transform(pre_courses_df['letter_gr'])
+        consider_data = pre_courses_df[selected_vars+['letter_gr']] 
 
-def ols_reg():
-    return
+        formula = 'letter_gr ~ {}'.format(selected_vars[0])
+        for v in selected_vars[1:]:
+            if v=='race' or v=='gender':
+                formula += ' + C({})'.format(v) # treat as categorical       
+            else:
+                formula += ' + {}'.format(v)
 
-
-def multino_reg():
-    return
+        try:
+            model = smf.mnlogit(formula, data=consider_data)
+            results = model.fit_regularized()
+            
+            prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
+            prediction = results.predict(cur_course_df[selected_vars])
+            prediction_df = prediction_df.join(prediction)
+            prediction_df.set_index('name', inplace=True)
+            
+            st.markdown('<hr>', unsafe_allow_html=True)
+            st.markdown('Pseudo $$R^2$$: {:.2f}'.format(results.prsquared))
+            # decode letter_gr:
+            prediction_df.columns = [le.inverse_transform(prediction.columns)]
+            # switch to percentage format and display:
+            st.table(prediction_df.applymap(lambda x: '{:.2%}'.format(x)))
+        
+        except np.linalg.LinAlgError:
+            non_unique_vars = consider_data.columns[consider_data.nunique() <= 1]
+            non_unique_vars = " ".join(tuple(non_unique_vars))
+            st.error(
+            '''
+            The following variable(s) are non-unique: {}.\n
+            They have a singular value for all students. Please deselect these variables.
+            '''.format(non_unique_vars))
 
 
 if __name__ == '__main__':
