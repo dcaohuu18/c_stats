@@ -75,7 +75,7 @@ def basics(course, current_term, cur_course_df):
 
 
 #==============================================================================
-from helper_functions import knn, ols_reg, multino_reg
+from helper_functions import knn, ols_reg, multino_reg, normalize, reweigh
 from datetime import datetime
 import re
 from sklearn.preprocessing import LabelEncoder
@@ -91,8 +91,11 @@ METHOD_MAP = {
 def advanced(course, current_term):
     st.header('Advanced')
 
+    st.subheader('Preprocessing')
+    # select the number of terms to retrieve:
     n_past_term = st.number_input("How many terms to retrieve?", min_value=1, max_value=10, value=5)
     course_df = read_n_recent(course, current_term, n_term=n_past_term)
+    st.text('')
 
     # calculate age at the time of the course:
     course_year = course_df.term_code.apply(lambda x: re.findall("\d+", x)[0]).astype(int)
@@ -101,16 +104,48 @@ def advanced(course, current_term):
     # encode gender and race:
     le = LabelEncoder()
     course_df['gender'] = le.fit_transform(course_df['gender'])
-    course_df['race'] = le.fit_transform(course_df['race']) 
+    course_df['race'] = le.fit_transform(course_df['race'])
 
+    # separate current course from previous courses:
     cur_course_df = course_df.loc[course_df.final_grade.isna()]
     pre_courses_df = course_df.loc[~course_df.final_grade.isna()]
+
+    # normalize and reweigh: 
+    norm_reweigh = st.checkbox('Normalize and reweigh (recommended)', value=True) 
+    if norm_reweigh:
+        assessments = st.multiselect('What will be counted towards the final grade?',
+                                    options=['exam', 'home', 'quiz', 'attendance', 'LMS_mess', 'LMS_accesses', 'LMS_time'],
+                                    default=['exam', 'home', 'quiz', 'attendance'])
+        weights_dict = {} 
+        for a in assessments:
+            weights_dict[a] = st.number_input('Weight of {} (%):'.format(a), min_value=1, max_value=100, value=50)
+
+        normalize(cur_course_df, weights_dict)       
+        normalize(pre_courses_df, weights_dict)
+        reweigh(pre_courses_df, weights_dict)
+
+        st.markdown('<hr>', unsafe_allow_html=True) # horinzontal rule
 
     # drop unavailable and unrelevant vars:
     rel_vars = cur_course_df.dropna(how='all', axis=1)
     rel_vars.drop(columns=['id', 'f_name', 'l_name', 'birth_dt', 'address', 'email', 'course_code', 'term_code'], inplace=True)
-    selected_vars = st.multiselect('Select variables to consider:',  options=list(rel_vars.columns), 
-                                    default=list(rel_vars.columns)[2:-1])
+    
+    if norm_reweigh:
+        drop_cols = []
+        for ass in weights_dict.keys():
+            r = re.compile("^{}\d+$".format(ass))
+            drop_cols += list(filter(r.match, rel_vars.columns))
+        # we drop columns like 'home1', 'home2' since we only consider 'home' (normalized)
+
+        rel_vars.drop(columns=drop_cols, inplace=True)
+        selected_vars = st.multiselect('Select variables to consider:', options=list(rel_vars.columns), 
+                                        default=list(rel_vars.columns)[2:])
+    else:
+        selected_vars = st.multiselect('Select variables to consider:', options=list(rel_vars.columns), 
+                                        default=list(rel_vars.columns)[2:-1])
+
+    if not selected_vars:
+        st.error("Please select at least one variable!") 
 
     # st.subheader('Statistical analysis')
     
