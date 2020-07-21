@@ -19,74 +19,76 @@ def basics(course, current_term, cur_course_df):
     grade_df.dropna(how='all', axis=1, inplace=True) # drop unavailable grades
 
     # Summary:
-    st.subheader('Summary')
+    st.subheader('Summary figures')
     summary_table(cur_course_df, grade_df)
     st.text('')
 
+    graph_choice = st.selectbox('Select variable for visualization:', ['Grades', 'Attendance', 'Submission', 
+                                                                        'LMS Time', 'LMS Messages'])
+    st.subheader(graph_choice)
+
     # Grades:
-    st.subheader('Grades')
-    st.info('Click on the legend to select the desired assessment')
-    # switch to long form:
-    grade_df = grade_df.melt(var_name='assessment', value_name='grade')
-    graph_multi_hist(grade_df, x_field='grade', color_field='assessment', max_nbins=20, x_title='Grade')
+    if graph_choice=='Grades':
+        st.info('Click on the legend to select the desired assessment')
+        # switch to long form:
+        grade_df = grade_df.melt(var_name='assessment', value_name='grade')
+        graph_multi_hist(grade_df, x_field='grade', color_field='assessment', max_nbins=20, x_title='Grade')
 
     # Attendance:
-    st.subheader('Attendance')
-    st.text('')
-    graph_hist(cur_course_df, 'attendance', x_title='Attendance percentage')
+    elif graph_choice=='Attendance':
+        st.text('')
+        graph_hist(cur_course_df, 'attendance', x_title='Attendance percentage')
 
     # Submission Status:
-    st.subheader('Submission')
-    submission_percentage = [['ontime', cur_course_df.ontime.mean()], 
-                             ['late', cur_course_df.late.mean()], 
-                             ['missed', cur_course_df.missed.mean()]]   
-    submission_percentage = pd.DataFrame(submission_percentage, columns = ['status', 'percentage'])
-    # Whole class: 
-    graph_donut(submission_percentage, title='Submission status', value_fname='status')
-    # Each student:
-    submission_df = cur_course_df[['name', 'ontime', 'late', 'missed']].copy()
-    # switch to long form:
-    submission_df = submission_df.melt('name', var_name='status', value_name='percentage') 
-    st.text('')
-    st.text('')
-    graph_submission(submission_df)
+    elif graph_choice=='Submission':
+        submission_percentage = [['ontime', cur_course_df.ontime.mean()], 
+                                 ['late', cur_course_df.late.mean()], 
+                                 ['missed', cur_course_df.missed.mean()]]   
+        submission_percentage = pd.DataFrame(submission_percentage, columns = ['status', 'percentage'])
+        # Whole class: 
+        graph_donut(submission_percentage, title='Submission status', value_fname='status')
+        # Each student:
+        submission_df = cur_course_df[['name', 'ontime', 'late', 'missed']].copy()
+        # switch to long form:
+        submission_df = submission_df.melt('name', var_name='status', value_name='percentage') 
+        graph_submission(submission_df)
 
     # LMS Time:
-    st.subheader('LMS Time')
-    st.text('')
-    LMS_time_df = cur_course_df[['name', 'LMS_time', 'LMS_accesses']].copy()
-    # switch to long form:
-    LMS_time_df = LMS_time_df.melt('name', var_name='type', value_name='amount')
-    LMS_time_df['type'] = LMS_time_df.type.apply(lambda x: 'weekly accesses' if x=='LMS_accesses' else 'session time (mins)')
-    graph_LMS_time(LMS_time_df)
+    elif graph_choice=='LMS Time':
+        st.text('')
+        LMS_time_df = cur_course_df[['name', 'LMS_time', 'LMS_accesses']].copy()
+        # switch to long form:
+        LMS_time_df = LMS_time_df.melt('name', var_name='type', value_name='amount')
+        LMS_time_df['type'] = LMS_time_df.type.apply(lambda x: 'weekly accesses' if x=='LMS_accesses' else 'session time (mins)')
+        graph_LMS_time(LMS_time_df)
 
     # LMS Messages:
-    st.subheader('LMS Messages')
-    # make histogram of LMS_mess:
-    LMS_mess_df = cur_course_df[['name', 'LMS_mess']].copy()
-    hist_df = make_hist(LMS_mess_df.LMS_mess, bins=[0, 2, 5, 8, np.inf])
-    hist_df.iat[-1, -1] = '≥ 8'
-    hist_df.rename(columns={'interval': 'messages'}, inplace=True) # rename to plot
-    # add percentage and graph:
-    hist_df['percentage'] = hist_df['count']/hist_df['count'].sum() * 100
-    mean_mess = LMS_mess_df.LMS_mess.mean()
-    graph_donut(hist_df, title='Messages distribution', 
-                center_text='{:.1f} per student'.format(mean_mess), value_fname='messages')
+    elif graph_choice=='LMS Messages':
+        # make histogram of LMS_mess:
+        LMS_mess_df = cur_course_df[['name', 'LMS_mess']].copy()
+        hist_df = make_hist(LMS_mess_df.LMS_mess, bins=[0, 2, 5, 8, np.inf])
+        hist_df.iat[-1, -1] = '≥ 8'
+        hist_df.rename(columns={'interval': 'messages'}, inplace=True) # rename to plot
+        # add percentage and graph:
+        hist_df['percentage'] = hist_df['count']/hist_df['count'].sum() * 100
+        mean_mess = LMS_mess_df.LMS_mess.mean()
+        graph_donut(hist_df, title='Messages distribution', 
+                    center_text='{:.1f} per student'.format(mean_mess), value_fname='messages')
 
 
 #==============================================================================
-from helper_functions import knn, ols_reg, multino_reg, normalize, reweigh
+from helper_functions import knn_modeller, knn_predictor, ols_modeller, ols_predictor
+from helper_functions import normalize, reweigh, modify_cur_course
 from datetime import datetime
 import re
 from sklearn.preprocessing import LabelEncoder
+import st_state_patch
 
-
-# map from the method's name (string) to its implementation (function):
-METHOD_MAP = {
-    'K nearest neighbors': knn,
-    'Multinomial regression': multino_reg,
-    'Ordinary least squares regression': ols_reg
-} 
+# map from the prediction preference to the method used:
+PREF_METHOD_MAP = {
+    'Regression of percentage grades': (ols_modeller, ols_predictor),
+    'Classification of letter grades': (knn_modeller, knn_predictor)}
+ 
 
 def advanced(course, current_term):
     st.header('Advanced')
@@ -120,7 +122,7 @@ def advanced(course, current_term):
         for a in assessments:
             weights_dict[a] = st.number_input('Weight of {} (%):'.format(a), min_value=1, max_value=100, value=50)
 
-        normalize(cur_course_df, weights_dict)       
+        normalize(cur_course_df, weights_dict)   
         normalize(pre_courses_df, weights_dict)
         reweigh(pre_courses_df, weights_dict)
 
@@ -145,19 +147,40 @@ def advanced(course, current_term):
                                         default=list(rel_vars.columns)[2:-1])
 
     if not selected_vars:
-        st.error("Please select at least one variable!") 
-
-    # st.subheader('Statistical analysis')
+        st.error("Please select at least one variable!")
     
     st.subheader('Modelling')
-    st.info(
-    '''
-    K nearest neighbors and Multinomial regression is for classification of letter grades. 
-    Ordinary least square regression is for regression of percentage grades.
-    ''')
-    selected_method = st.selectbox('Select method:', list(METHOD_MAP.keys()))
-    selected_method = METHOD_MAP[selected_method]
-    selected_method(cur_course_df, pre_courses_df, selected_vars)
+    # Create a session state to preserve the changes across sessions
+    session_state = st.State() 
+    if not session_state:
+        session_state.new_cur_course_df = cur_course_df.copy()
+        session_state.change_by_slider_id = 0
+    
+    # Adjust current course's variables:
+    adjustable = set(selected_vars)
+    adjustable.difference_update(['age', 'gender', 'race']) # remove age, gender, and race
+    adjust_var = st.selectbox('Select variable to adjust:', list(adjustable))
+    
+    change_by_slider = st.empty() # placeholder
+    apply_to = st.number_input('Apply this change to the lowest (%):', min_value=0, max_value=100, value=25, step=5)
+    
+    if st.button("Reset all changes"):
+        session_state.new_cur_course_df = cur_course_df.copy()
+        session_state.change_by_slider_id += 1
+
+    change_by = change_by_slider.slider('Change {} by (%):'.format(adjust_var), min_value=-100, max_value=100, 
+                                        value=0, key=session_state.change_by_slider_id)  
+    modify_cur_course(cur_course_df, session_state.new_cur_course_df, adjust_var, change_by, apply_to)
+
+    # Select prediction preference and run model:
+    prediction_pref = st.selectbox('Select your prediction preference:', list(PREF_METHOD_MAP.keys()))
+    modeller_used, predictor_used = PREF_METHOD_MAP[prediction_pref]
+
+    model, metrics = modeller_used(pre_courses_df, selected_vars) 
+    ## for KNN, the metric is the accuracy
+    ## for OLS, the metrics are the correlation df and the scatter plot  
+    if st.button('Run model'):
+        predictor_used(session_state.new_cur_course_df, selected_vars, model, *metrics)
 
 
 #==============================================================================
