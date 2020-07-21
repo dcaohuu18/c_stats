@@ -19,28 +19,6 @@ def estimate_pdf(sample, n_points=101):
 # BASICS - GRAPHS:
 
 def summary_table(course_df, grade_df):
-    # Mean statistics:
-    mean_atten = course_df.attendance.mean()
-    mean_grade = grade_df.mean().mean() # course_df.final_grade.mean()
-    mean_ontime = course_df.ontime.mean()
-    
-    st.markdown(
-        '''
-        <table style=\"width:100%; text-align:center\">
-            <tr style=\"font-size: 12px; color: gray; background-color:#D1ECF1\">
-                <td style=\"border:2px solid white; border-radius:7px 7px 0 0\">Average attendance</td>
-                <td style=\"border:2px solid white; border-radius:7px 7px 0 0\">Average grade</td>
-                <td style=\"border:2px solid white; border-radius:7px 7px 0 0\">Average ontime</td>
-            </tr>
-            <tr style=\"font-size: 25px; color: gray; background-color:#D1ECF1\">
-                <td style=\"border:2px solid white; border-top-style:hidden; border-radius:0 0 7px 7px; width:34%\">{:.2f}%</td>
-                <td style=\"border:2px solid white; border-top-style:hidden; border-radius:0 0 7px 7px; width:32%\">{:.2f}</td>
-                <td style=\"border:2px solid white; border-top-style:hidden; border-radius:0 0 7px 7px; width:34%\">{:.2f}%</td>
-            </tr>
-        </table>
-        '''.format(mean_atten, mean_grade, mean_ontime),
-        unsafe_allow_html=True)
-
     # Median statistics:
     median_atten = course_df.attendance.median()
     median_grade = grade_df.median().median() # course_df.final_grade.median()
@@ -192,6 +170,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
+import plotly.graph_objects as go
 
 
 def normalize(course_df, weights_dict):
@@ -207,70 +186,163 @@ def reweigh(course_df, weights_dict):
         course_df['final_grade'] += course_df[ass]*(w/100)
 
 
+def modify_cur_course(cur_course_df, new_cur_course_df, adjust_var, change_by, apply_to_per):
+    # convert from percentage to the number of rows/students this change will apply to: 
+    apply_to_n = round(len(cur_course_df.index)*(apply_to_per/100))
+    # get the index of the n rows with smallest values of adjust_var:
+    apply_to_idx = cur_course_df.nsmallest(apply_to_n, adjust_var).index
+
+    change_by = 1 + (change_by/100)
+    new_cur_course_df.loc[apply_to_idx, adjust_var] = cur_course_df.loc[apply_to_idx, adjust_var]*change_by
+    
+    if adjust_var in ['LMS_accesses', 'LMS_time', 'LMS_mess']:
+        pass
+    else:
+        new_cur_course_df[adjust_var]=new_cur_course_df[adjust_var].apply(lambda x: x if x<=100 else 100)
+        # ensure that variables like attendance, ontime cannot exceed 100
+
+
 def get_letter_gr(course_df, D_cutoff, step):
     grade_bins = [0] + [l-1 for l in range(D_cutoff, D_cutoff+4*step, step)] + [100]
     letters = ['F', 'D', 'C', 'B', 'A']
-    return pd.cut(course_df.final_grade, grade_bins, labels=letters) 
+    return pd.cut(course_df.final_grade, grade_bins, labels=letters)
 
 
-def knn(cur_course_df, pre_courses_df, selected_vars):
+def knn_modeller(pre_courses_df, selected_vars):
     st.sidebar.header('Control Center')
     st.sidebar.warning('We only consider A, B, C, D, and F.')
     D_cutoff = st.sidebar.number_input("Cutoff point of a D:", min_value=1, max_value=96, value=60)
     step = st.sidebar.number_input("Step:", min_value=1, max_value=20, value=10)
-    K = st.sidebar.slider("Select K:", min_value=1, max_value=10, value=5) # need to change this: max = len//5
+    #K = st.sidebar.slider("Select K:", min_value=1, max_value=10, value=5) # need to change this: max = len//5
  
-    if st.button('Run model'):
-        pre_courses_df.reset_index(inplace=True)
-        pre_courses_df['letter_gr'] = get_letter_gr(pre_courses_df, D_cutoff, step)
+    pre_courses_df.reset_index(inplace=True)
+    pre_courses_df['letter_gr'] = get_letter_gr(pre_courses_df, D_cutoff, step)
 
-        X = pre_courses_df[selected_vars].copy()
-        Y = pre_courses_df['letter_gr'].copy()
+    X = pre_courses_df[selected_vars].copy()
+    Y = pre_courses_df['letter_gr'].copy()
 
-        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=2) # hard-coded seed!
 
-        knn = neighbors.KNeighborsClassifier(n_neighbors=K, weights='uniform') # what's the arg weights for?
-        knn.fit(X_train, Y_train)
+    knn = neighbors.KNeighborsClassifier(n_neighbors=5, weights='uniform') 
+    # what's the arg weights for?
+    # n_neighbors is hard-coded, optimal n_neighbors is still undetermined
+    knn.fit(X_train, Y_train)
 
-        test_prediction = knn.predict(X_test)
-        accuracy = metrics.accuracy_score(Y_test, test_prediction)
+    test_prediction = knn.predict(X_test)
+    accuracy = metrics.accuracy_score(Y_test, test_prediction)
 
-        cur_X = cur_course_df[selected_vars].copy()
-        cur_prediction = knn.predict(cur_X).copy()
+    return knn, [accuracy] # model and metrics (for predictor_used() >> see advanced() in c_stats.py)
 
-        prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
-        prediction_df['predicted_grade'] = cur_prediction
-        prediction_df.set_index('name', inplace=True)
+def knn_predictor(cur_course_df, selected_vars, knn_model, accuracy):
+    cur_X = cur_course_df[selected_vars].copy()
+    cur_prediction = knn_model.predict(cur_X).copy()
 
-        summary_df = prediction_df.predicted_grade.value_counts()
-        summary_df.rename('predicted_count', inplace=True)
+    prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
+    prediction_df['predicted_grade'] = cur_prediction
+    prediction_df.set_index('name', inplace=True)
+
+    summary_df = prediction_df.predicted_grade.value_counts()
+    summary_df.rename('predicted_count', inplace=True)
         
-        st.markdown('<hr>', unsafe_allow_html=True)
-        st.markdown('**Accuracy:** {:.2%}'.format(accuracy))
-        st.table(summary_df)
-        st.table(prediction_df)
+    # Display the results:
+    st.text('')
+    #st.markdown('**Accuracy:** {:.2%}'.format(accuracy))
+
+    summary_table = go.Figure(data=[go.Table(
+                    header=dict(values=['Grade', 'Count']),
+                    cells=dict(values=[summary_df.index, summary_df.values], font_size=12, height=30, 
+                               fill_color=[['aliceblue','ghostwhite']*len(summary_df.index)]))])
+    summary_table.update_layout(height=len(summary_df.index)*42, margin=dict(l=0, r=0, t=0, b=0))
+    st.plotly_chart(summary_table)
+
+    prediction_table = go.Figure(data=[go.Table(
+                    header=dict(values=['Name', 'Predicted grade']),
+                    cells=dict(values=[prediction_df.index, prediction_df.values], font_size=12, height=30, 
+                               fill_color=[['aliceblue','ghostwhite']*len(prediction_df.index)]))])
+    prediction_table.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
+    st.plotly_chart(prediction_table)
     
 
-def ols_reg(cur_course_df, pre_courses_df, selected_vars):
-    formula = 'final_grade ~ {}'.format(selected_vars[0])
+def ols_modeller(pre_courses_df, selected_vars):
+    continuous_vars = []
+
+    if selected_vars[0] in ['race', 'gender']:
+        formula = 'final_grade ~ C({})'.format(selected_vars[0]) # treat as categorical       
+    else:
+        formula = 'final_grade ~ {}'.format(selected_vars[0])
+        continuous_vars.append(selected_vars[0])
+    
     for v in selected_vars[1:]:
-        if v=='race' or v=='gender':
+        if v in ['race', 'gender']:
             formula += ' + C({})'.format(v) # treat as categorical       
         else:
             formula += ' + {}'.format(v)
+            continuous_vars.append(v)
+
+    consider_data = pre_courses_df[selected_vars+['final_grade']]
+    model = smf.ols(formula, data=consider_data) 
+    results = model.fit()
+
+    correlation = pre_courses_df[selected_vars].corrwith(pre_courses_df['final_grade'])
+    correlation.sort_values(ascending=False, inplace=True)
+    correlation.rename('correlation', inplace=True)
+
+    # make a scatter plot of continuous vars and final_grade:
+    select_box = alt.binding_select(options=continuous_vars, name='Variable: ')
+    sel = alt.selection_single(fields=['variable'], bind=select_box, init={'variable': continuous_vars[0]})
+    # switch to long form data:
+    long_consider_data = consider_data.melt(id_vars='final_grade')
+    scatter = alt.Chart(long_consider_data).transform_filter(sel
+                                            ).mark_point().encode(x=alt.X('value:Q', scale=alt.Scale(zero=False)), 
+                                                                  y=alt.Y('final_grade:Q', scale=alt.Scale(zero=False)),
+                                                                  tooltip=['variable', 'value:Q', 
+                                                                            alt.Tooltip('final_grade:Q', format='.2f')]
+                                            ).add_selection(sel
+                                            ).properties(width=670, height=300
+                                            ).configure_axis(titleFontSize=15)
     
-    if st.button('Run model'):
-        model = smf.ols(formula, data=pre_courses_df) 
-        results = model.fit()
+    return results, [correlation, scatter] # model and metrics (for predictor_used() >> see advanced() in c_stats.py)
 
-        prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
-        prediction_df['predicted_grade'] = results.predict(cur_course_df[selected_vars])
-        prediction_df.set_index('name', inplace=True)
+def ols_predictor(cur_course_df, selected_vars, results, correlation, scatter): 
+    prediction_df = pd.DataFrame({'name': cur_course_df['f_name'] + ' ' + cur_course_df['l_name']})
+    prediction_df['predicted_grade'] = results.predict(cur_course_df[selected_vars])
+    prediction_df.set_index('name', inplace=True)
 
-        st.markdown('<hr>', unsafe_allow_html=True)
-        st.markdown('$$R^2$$: {:.2f}'.format(results.rsquared))
-        st.markdown('$$p$$-value: {:.2f}'.format(results.f_pvalue))
-        st.table(prediction_df)
+    # Display the results:
+    st.text('')
+    #st.markdown('$$R^2$$: {:.2f}'.format(results.rsquared))
+    #st.markdown('$$p$$-value: {:.2f}'.format(results.f_pvalue))  
+    mean_predicted_grade = prediction_df.predicted_grade.mean()
+    st.markdown(
+        '''
+        <table style=\"width:100%; text-align:center\">
+        <tr style=\"font-size: 14px; color: gray; background-color:#D1ECF1\">
+            <td style=\"border:2px solid white; border-top-style:hidden; border-radius:7px 7px 0 0\">Mean predicted grade</td>
+        </tr>
+        <tr style=\"font-size: 25px; color: gray; background-color:#D1ECF1\">
+            <td style=\"border:2px solid white; border-top-style:hidden; border-radius: 0 0 7px 7px; width:32%\">{:.2f}</td>
+        </tr>
+        </table>
+        '''.format(mean_predicted_grade), unsafe_allow_html=True)
+
+    st.text('')
+    st.altair_chart(scatter)
+
+    correlation = correlation.apply(lambda x: '{:.3f}'.format(x)) # round to 3 decimal places
+    corr_table = go.Figure(data=[go.Table(
+                    header=dict(values=['Variable', 'Correlation with final grade']),
+                    cells=dict(values=[correlation.index, correlation.values], font_size=12, height=30,
+                               fill_color =[['aliceblue','ghostwhite']*len(correlation.index)]))])
+    corr_table.update_layout(height=len(selected_vars)*33, margin=dict(l=0, r=0, t=0, b=0))
+    st.plotly_chart(corr_table)
+    
+    prediction_df = prediction_df.applymap(lambda x: '{:.2f}'.format(x)) # round to 2 decimal places
+    prediction_table = go.Figure(data=[go.Table(
+                    header=dict(values=['Name', 'Predicted grade']),
+                    cells=dict(values=[prediction_df.index, prediction_df.values], font_size=12, height=30, 
+                               fill_color=[['aliceblue','ghostwhite']*len(prediction_df.index)]))])
+    prediction_table.update_layout(margin=dict(l=0, r=0, t=0, b=0))
+    st.plotly_chart(prediction_table)
 
 
 def multino_reg(cur_course_df, pre_courses_df, selected_vars):
@@ -316,6 +388,7 @@ def multino_reg(cur_course_df, pre_courses_df, selected_vars):
             '''
             The following variable(s) are non-unique: {}.\n
             They have a singular value for all students. Please deselect these variables.
+            If that's not the case, please deselect one variable that you believe is least correlated to the final grade.
             '''.format(non_unique_vars))
 
 
