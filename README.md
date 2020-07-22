@@ -7,7 +7,7 @@ A live version can be viewed at: https://streamlit-c-stats.herokuapp.com/
 
 1. ```git clone``` this respository to your local machine.
 2. Install all the dependencies listed in ```requirements.txt```. Many of these dependencies are installed when you install Streamlit, 
-so you may want to have that installed first (please see https://docs.streamlit.io/en/stable/troubleshooting/clean-install.html). 
+so you may want to have that installed first (please see [How to clean install Streamlit](https://docs.streamlit.io/en/stable/troubleshooting/clean-install.html)). 
 It is also advised that you create a separate environment for this application.  
 
 ## Usage
