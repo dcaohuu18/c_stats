@@ -141,7 +141,7 @@ def graph_donut(percentage_df, title, center_text='', value_fname='value', perce
     fig.annular_wedge(x=0, y=1, inner_radius=0.15, outer_radius=0.25, direction="anticlock",
                     start_angle=cumsum('angle', include_zero=True), end_angle=cumsum('angle'),
                     hover_fill_alpha = 1.0, hover_fill_color = 'skyblue', line_color="white", 
-                    legend_field=value_fname, color='color', alpha=0.9, source=percentage_df, name='donut')
+                    legend_field=value_fname, color='color', source=percentage_df, name='donut')
 
     tooltips=[(value_fname, "@%s"%value_fname), (percentage_fname, "@%s"%percentage_fname+"{0.2f}%")]
     hover = HoverTool(tooltips=tooltips, names=['donut'])
