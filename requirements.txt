@@ -74,7 +74,7 @@ scipy==1.5.0
 Send2Trash==1.5.0
 six==1.15.0
 statsmodels==0.11.1
-streamlit==0.62.0
+streamlit==0.64.0
 terminado==0.8.3
 testpath==0.4.4
 text-unidecode==1.3
