@@ -197,8 +197,8 @@ def main():
     course_list = ['CS_320'] # hard coded # will need to read database
     course = st.selectbox('Select course:', course_list)
 
-    today_year = datetime.today().year
-    today_month = datetime.today().month
+    today_year = 2020 # hard-coded to avoid error, will need to change to: datetime.today().year
+    today_month = 7   # hard-coded to avoid error, will need to change to: datetime.today().month
     current_term = '{}_{}'.format(MONTH_SEM_MAP[today_month], today_year)
 
     cur_course_df = read_n_recent(course, current_term)
